@@ -8,7 +8,7 @@
 #define NB 32                                  //number of bits of uint32_t
 #define SLOT (128/NB)
 #define MAX 4294967295                         //the MAX value of uint32_t
-#define N 128                             //the # of number
+#define N 128                                  //the # of number
 #define NR ((N + 127) / 128)                   //the number of raws of simd matrix
 
 static uint32_t mask[NB] = {
