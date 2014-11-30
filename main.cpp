@@ -1,9 +1,8 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <memory.h>
-#include <iostream>
+#include <emmintrin.h>
 #include <time.h>
-using namespace std;
 # define NB 32
 # define Max 4294967295                          //uint32_t的最大值
 # define N 51200000                              //插入的数量
@@ -90,8 +89,10 @@ void pack2row(uint32_t *src, __m128i my[NR][32])
 			invert(srclet, inverse, NB);
 			for (k = 0; k < NB; k++)
 			{
-				memcpy(&my[j][k].m128i_i32[i], inverse + k, sizeof(uint32_t));    //把转换后的数字写入my中
-			}
+                __m128i *temp = &my[j][k] + NB*i;
+				//memcpy(&my[j][k].m128i_i32[i], inverse + k, sizeof(uint32_t));    //把转换后的数字写入my中
+                memcpy(temp, inverse + k, sizeof(uint32_t));    //把转换后的数字写入my中
+            }
 		}
 	}
 }
@@ -228,7 +229,7 @@ int main()
 	}*/
 	clock_t begin, end;
 	begin = clock();
-	find(my,32,7,NR);
+    find(my,32,7,NR);
 	end = clock();
 	printf("Use SSE：%lf \n", (double)(end - begin));
 
