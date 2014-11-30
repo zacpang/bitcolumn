@@ -7,6 +7,8 @@
 # define Max 4294967295                          //uint32_t的最大值
 # define N 51200000                              //插入的数量
 # define NR ((N + 127) / 128)
+
+
 __m128i my[NR][32];                              //保存重构之后插入的数字
 uint32_t src[N];								//初始插入数组
 __m128i res[NR];								//保存运用SSE时，比较的结果
