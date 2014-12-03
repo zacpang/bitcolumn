@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <memory.h>
-#include <emmintrin.h>
+#include <xmmintrin.h>
 #include <time.h>
 #include <stdlib.h>
 
@@ -77,8 +77,8 @@ void print2dmatrix(__m128i matrix[][NB])
 		{
 			for (int j = 0; j < 32; j++)
 			{
-				__m128i tmp = matrix[k][j];
-				printf("%u\t", tmp.m128i_i32[i]);
+                uint32_t *t = (uint32_t*)&matrix[k][j];
+				printf("%u\t", t[i]);
 			}
 			printf("\n\n\n");
 		}
@@ -96,7 +96,8 @@ void print1dmatrix(__m128i matrix[],int n)
 	{
 		for (int j = 0; j < SLOT; j++)
 		{
-			printf("%u\t",matrix[i].m128i_i32[j]);
+            uint32_t *t = (uint32_t*)&matrix[i];
+			printf("%u\t",t[j]);
 		}
 	}
 	printf("\n");
@@ -164,12 +165,13 @@ void datagenerator(uint32_t *data, int count)
 /**
 *  Read data from file
 **/
+/**
 void datareader()
 {
-	FILE *data = fopen("d:\\文档\\randomnumbers_0.1billion.txt", "r+");
+	readdata = fopen("/Users/zhifei/Desktop/randomnumbers_0.1billion.txt", "r+");
 	int buffer[128];
 }
-
+**/
 
 /**
 * Load inverted data to a row of simd matrix
@@ -191,8 +193,8 @@ void load2simdmatrix(__m128i matrix[][NB])
 {
 	
 	uint32_t inverse[SLOT][NB];
-	readdata=fopen("d:\\文档\\randomnumbers_0.1billion.txt", "r+");
-	for (int i = 0; i<NR; i++) //read 128 numbers for a time
+	readdata=fopen("/Users/zhifei/Desktop/randomnumbers_0.1billion.txt", "r+");
+    for (int i = 0; i<NR; i++) //read 128 numbers for a time
 	{
 		datagenerator(data+i*SLOT*NB, 128);
 		pack2simdrow(data+i*SLOT*NB, inverse);
@@ -200,33 +202,6 @@ void load2simdmatrix(__m128i matrix[][NB])
 	}
 	fclose(readdata);
 }
-
-
-/**
-void pack2row(uint32_t *src, __m128i my[NR][32])
-{
-int i, j, k;
-uint32_t srclet[NB];
-uint32_t inverse[NB];
-for (j = 0; j < NR; j++)
-{
-for (i = 0; i < SLOT; i++)
-{
-memset(srclet, 0, sizeof(uint32_t)*NB);
-memset(inverse, 0, sizeof(uint32_t)*NB);
-memcpy(srclet, &src[(j*4+i)*NB], sizeof(uint32_t)*NB);
-
-invert(srclet, inverse);
-for (k = 0; k < NB; k++)
-{
-memcpy(&my[j][k].m128i_i32[i], inverse + k, sizeof(uint32_t));    //把转换后的数字写入my中
-//memcpy(&my[j][k]+NB*i, inverse+k, sizeof(uint32_t));    //把转换后的数字写入my中
-//my[j][k].m128i_i32[i] = inverse[k]
-}
-}
-}
-}
-**/
 
 
 void find_init(uint32_t value)
@@ -250,8 +225,9 @@ void find_init(uint32_t value)
 void find(__m128i my[NR][32], int n, int value, int m)    //n在这里取32，value是要查找的值，m是NR
 {
 
-	__m128i tmp;									//存放临时结果				
+	__m128i tmp;									//存放临时结果
 	__m128i t = _mm_set_epi32(MAX, MAX, MAX, MAX);  //辅助数组，初始化为全部都是1
+    __m128i zeros = _mm_setzero_si128 ();           //0 vector
 	//__m128i check = _mm_set_epi32(0, 0, 0, 0);
 	//__m128i check_res;
 	for (int j = 0; j < m; j++)
@@ -260,13 +236,13 @@ void find(__m128i my[NR][32], int n, int value, int m)    //n在这里取32，va
 		{ 
 			tmp = _mm_andnot_si128(_mm_xor_si128(my[j][i], com_value[i]), t);  //只有当my[j][i]和Value中对应的位相同时，tmp对应的位才是1. （没有非异或函数，所以先异或，再取反）
 			res[j] = _mm_and_si128(res[j], tmp); //与上一轮结果进行与操作，这样只有全部为1的最终结果才是1
-			if (i % 4 == 0)
-			{
-				if (res[j].m128i_i32[0] == 0 && res[j].m128i_i32[1] == 0 && res[j].m128i_i32[2] == 0 && res[j].m128i_i32[3] == 0)
-				{
-					break;
-				}
-			}
+			
+            if (_mm_movemask_epi8(_mm_cmpeq_epi32(res[j], zeros)) == 0xffff)
+            {
+                //printf("BREAK\n");
+                break;
+            }
+			
 
 		}
 	}
@@ -296,7 +272,7 @@ int main()
 
 	clock_t begin, end;
 	//4294967295
-	uint32_t value = 3121122112;
+	uint32_t value = 1979767798;
 	//print(data,N);
 
 	begin = clock();
@@ -309,5 +285,6 @@ int main()
 	find_without_sse(data,N,value);
 	end = clock();
 	printf("Without SSE：%lf \n", (double)(end - begin) / CLOCKS_PER_SEC);
+    
 	return 0;
 }
