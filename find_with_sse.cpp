@@ -9,7 +9,7 @@
 #define NB 32                                  //number of bits of uint32_t
 #define SLOT (128/NB)
 #define MAX 4294967295                         //the MAX value of uint32_t
-#define N 1280000                   //the # of number
+#define N 1280000                    //the # of number
 #define NR ((N + 127) / 128)                   //the number of raws of simd matrix
 
 static uint32_t mask[NB] = {
@@ -148,11 +148,11 @@ void datagenerator(uint32_t *data, int count)
 {
 	/*for (int i = 0; i < count; i++)
 	{
-		data[i] = i;
+	data[i] = i;
 	}*/
 	for (int i = 0; i < 128; i++)
 	{
-	fscanf(readdata, "%d", &data[i]);
+		fscanf(readdata, "%d", &data[i]);
 	}
 }
 
@@ -210,6 +210,7 @@ int find_init(uint32_t left, uint32_t right)
 	{
 		int c = (left >> (31 - i)) % 2;      //获取当前比较位
 		int d = (right >> (31 - i)) % 2;
+		//printf("%u ", c);
 		if (c == d)
 		{
 			count++;
@@ -226,7 +227,7 @@ int find_init(uint32_t left, uint32_t right)
 	//printf("\n %d \n",count);
 	uint32_t sum = 1;
 
-	for (int i = 0; i < 4; i++)   //初始化com_mask
+	for (int i = 0; i < 4; i++)  //初始化com_mask
 	{
 		sum = 2147483648;
 		for (int j = 0; j < 32; j++)
@@ -243,9 +244,8 @@ int find_init(uint32_t left, uint32_t right)
 			sum /= 2;
 		}
 	}
-
 	sum = 1;
-	for (int i = 0; i < 32; i++)  //初始化power数组
+	for (int i = 0; i < 32; i++)
 	{
 		power[i] = sum;
 		sum *= 2;
@@ -253,30 +253,8 @@ int find_init(uint32_t left, uint32_t right)
 	return count;
 }
 
-int count_withsse = 0;
-void check(int r, int com_res[], int num, int left, int right) //检查数据是否在left和right之间
-{
-	int pri_value = 0;   //记录要还原的数据
-	for (int i = 0; i < num; i++)
-	{
-		pri_value = 0;
-		for (int j = 0; j < NB; j++)
-		{
-			__m128i tmp = _mm_and_si128(matrix[r][j], com_mask[com_res[i]]);   //如果matrix[r][j]中第com_res[i]位是1，tmp中对应位也是1
-			if (tmp.m128i_i32[0] != 0 || tmp.m128i_i32[1] != 0 || tmp.m128i_i32[2] != 0 || tmp.m128i_i32[3] != 0)  //判断tmp是否是全0
-			{
-				pri_value += power[31 - j];
-			}
-		}
-		//printf("pri:%d\n",pri_value);
-		if (pri_value >= left && pri_value <= right)
-		{
-			res_set[count_withsse] = pri_value;  //res_set存放最终结果       
-			count_withsse++;
-		}
-	}
-}
 
+int count_res = 0;
 void find(__m128i my[NR][32], int n, int left, int right, int m)    //n在这里取32，value是要查找的值，m是NR
 {
 
@@ -297,37 +275,53 @@ void find(__m128i my[NR][32], int n, int left, int right, int m)    //n在这里取3
 			}
 		}
 	}
-	int com_res[128];    //存放待进一步检查的位
-	int next = 0;        //向com_res中存数时候的下标
-	int pri_value = 0;
+	
+	//print1dmatrix(res,NR);
 	for (int i = 0; i < NR; i++)
 	{
-		next = 0;
-		for (int j = 0; j < NB*SLOT; j++)
+		for (int j = 0; j < SLOT; j++)
 		{
-			__m128i tmp = _mm_and_si128(res[i], com_mask[j]);
-			if (tmp.m128i_i64[0] != 0 || tmp.m128i_i64[1] != 0)
+			if (res[i].m128i_i32[j] == 0)
 			{
-				com_res[next] = j;        //记录要进一步检查的位
-				next++;
+				continue;
+			}
+			else
+			{
+				for (int k = 0; k < NB; k++)
+				{
+					int c = (res[i].m128i_i32[j] >> k) % 2;
+					if (c == 0)
+						continue;
+					else
+					{
+						//printf("%d %d %d %d\n ", i, j, k, data[i * 128 + (SLOT - 1 - j)*NB + (NB - 1 - k)]);
+						//if (data[i * 128 + (SLOT - 1 - j)*NB + (NB - 1 - k)] < left || data[i * 128 + (SLOT - 1 - j)*NB + (NB - 1 - k)] > right)
+						int pri_value = 0;
+						for (int l = 0; l < NB; l++)
+						{
+							int flag = (uint32_t)(matrix[i][l].m128i_i32[j] >> k) % 2;
+							//printf("%d - %u %d %d %d \n", flag, matrix[i][l].m128i_i32[j],i,l,j);						
+							pri_value += flag * power[31 - l];
+						}
+						//printf("\npri_value : %d \n",pri_value);
+						if (pri_value < left || pri_value > right)
+						{
+							//printf("\n pri_value: %d    left: %d     right:%d sub\n", pri_value, left,right);
+							res[i].m128i_i32[j] = res[i].m128i_i32[j] - power[k];
+						}
+						else
+						{
+							count_res++;
+						}
+					}
+				}
 			}
 		}
-
-		check(i, com_res, next, left, right);
-		/*printf("\n");
-		for (int k = 0; k < next; k++)
-		{
-		printf("%d - ",com_res[k]);
-		}
-		printf("\n");*/
 	}
 }
 
-/**
-* find the data without see,just check the data from left to right
-**/
-int count_without = 0;   //record the number of nodes that meet the request
-void find_without_sse(uint32_t* src, int n, int left, int right)    //顺序查找
+int count_without = 0;
+void find_without_sse(uint32_t* src, int n, int left, int right)  //顺序查找
 {
 
 	for (int i = 0; i < n; i++)
@@ -340,32 +334,34 @@ void find_without_sse(uint32_t* src, int n, int left, int right)    //顺序查找
 	}
 }
 
-
-
 int main()
 {
 
-	load2simdmatrix(matrix);    //将数据转移到matrix中
+	load2simdmatrix(matrix);
 
 	//print2dmatrix(matrix);
 
 	clock_t begin, end;
+	//4294967295
 	uint32_t left = 0;
-	uint32_t right = 13000;
+	uint32_t right = 100000;
 	//print(data,N);
 
+	//print2dmatrix(matrix);
+
 	begin = clock();
+
 	find(matrix, 32, left, right, NR);
 	end = clock();
 	printf("Use SSE：%lf \n", (double)(end - begin) / CLOCKS_PER_SEC);
 	//print1dmatrix(res,NR);
-	printf("final number: %d\n", count_withsse);   //打印出符合要求的节点数目
+	printf("final number: %d\n", count_res);
 
 	begin = clock();
 	find_without_sse(data, N, left, right);
 	end = clock();
 	printf("Without SSE：%lf \n", (double)(end - begin) / CLOCKS_PER_SEC);
-	printf("final number: %d\n", count_without);  //打印出顺序查找时符合要求的节点数目
-
+	//print1dmatrix(com_mask,128);
+	printf("final number: %d\n", count_without);
 	return 0;
 }
