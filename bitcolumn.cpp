@@ -5,12 +5,10 @@
 #include <time.h>
 #include <stdlib.h>
 #include <emmintrin.h>
+#include "bitcolumn.h"
+#include "print_helper.h"
 
-#define NB 32                                  //number of bits of uint32_t
-#define SLOT (128/NB)
-#define MAX 4294967295                         //the MAX value of uint32_t
-#define N 128                      //the # of number
-#define NR ((N + 127) / 128)                   //the number of raws of simd matrix
+
 
 static uint32_t mask[NB] = {
 	0x80000000, 0x40000000, 0x20000000, 0x10000000,
@@ -34,77 +32,6 @@ uint32_t data[N];
 FILE *readdata;
 uint32_t power[32];
 uint32_t res_set[10000];
-/**
-*  Pirnt 1-d array
-**/
-void print(uint32_t *a, int count)
-{
-	int i;
-	for (i = 0; i<count; i++)
-	{
-		if (i % 32 == 0)
-			printf("\n------------------------------------\n");
-		printf("%u\t", a[i]);
-	}
-	printf("\n\n\n");
-
-}
-
-/**
-*  Print 2-d array
-**/
-void print2d(uint32_t a[][32], int d)
-{
-	int i, j;
-	for (i = 0; i<d; i++)
-	{
-		for (j = 0; j<32; j++)
-		{
-			printf("%u\t", a[i][j]);
-		}
-		printf("\n");
-	}
-	printf("\n\n\n");
-}
-
-
-/**
-* Print 2-d simd matrix
-**/
-void print2dmatrix(__m128i matrix[][NB])
-{
-
-	for (int k = 0; k < NR; k++)
-	{
-		for (int i = 0; i < 4; i++)
-		{
-			for (int j = 0; j < 32; j++)
-			{
-				uint32_t *t = (uint32_t*)&matrix[k][j];
-				printf("%u\t", t[i]);
-			}
-			printf("\n\n\n");
-		}
-		printf("********************************ROW**END*********************************\n");
-	}
-
-}
-
-/**
-* Print 1-d simd matrix
-**/
-void print1dmatrix(__m128i matrix[], int n)
-{
-	for (int i = 0; i < n; i++)
-	{
-		for (int j = 0; j < SLOT; j++)
-		{
-			uint32_t *t = (uint32_t*)&matrix[i];
-			printf("%u\t", t[j]);
-		}
-	}
-	printf("\n");
-}
 
 /**
 *   bit列存储的变换必须是bit的方阵，数组的长度=每个数的bit数
@@ -176,6 +103,7 @@ int buffer[128];
 /**
 * Load inverted data to a row of simd matrix
 **/
+
 void loadrow(__m128i matrix[][NB], int row, uint32_t rowdata[SLOT][NB])
 {
 	//print2d(rowdata,4);
