@@ -27,7 +27,7 @@ __m128i com_mask[128];
 __m128i res[NR];								//保存运用SSE时，比较的结果
 uint32_t res_without_sse[N];                    //保存顺序查询时，比较的结果
 __m128i matrix[NR][NB];
-__m128i com_value[NB];                         //由value得到的，用于比较的数组
+__m128i com_value[NB];                         //由将要比较的数得到，生成比较的数组
 uint32_t data[N];
 FILE *readdata;
 uint32_t power[32];
@@ -121,7 +121,7 @@ void load2simdmatrix(__m128i matrix[][NB])
 {
 
 	uint32_t inverse[SLOT][NB];
-	readdata = fopen("D:\\文档\\data\\randomnumbers_0.1billion.txt", "r+");
+	readdata = fopen("/Users/zhifei/Desktop/uniform_0.1billion.txt", "r+");
 	for (int i = 0; i<NR; i++) //read 128 numbers for a time
 	{
 		datagenerator(data + i*SLOT*NB, 128);
@@ -131,7 +131,13 @@ void load2simdmatrix(__m128i matrix[][NB])
 	fclose(readdata);
 }
 
-
+/**
+ * 1. Convert the value to simd array. Range will be converted into a simd array whose length is # of bits
+ * shared in common.
+ * 2. A 128-bit mask will be crated.
+ * 3. A power array which contains the power of 2 from 1 to 31 for the combination from bits to integer.
+ *
+ **/
 int find_init(uint32_t left, uint32_t right)
 {
 	int count = 0;
@@ -147,7 +153,7 @@ int find_init(uint32_t left, uint32_t right)
 		//printf("%u ", c);
 		if (c == d)
 		{
-			count++;
+			count++; //The # of bits shared in the common prefix of left and right
 			if (c == 0)
 				com_value[i] = _mm_set_epi32(0, 0, 0, 0);
 			else
@@ -161,7 +167,7 @@ int find_init(uint32_t left, uint32_t right)
 	//printf("\n %d \n",count);
 	uint32_t sum = 1;
 
-	for (int i = 0; i < 4; i++)  //初始化com_mask
+	for (int i = 0; i < 4; i++)  //初始化com_mask 生成128位的掩码向量
 	{
 		sum = 2147483648;
 		for (int j = 0; j < 32; j++)
@@ -181,7 +187,7 @@ int find_init(uint32_t left, uint32_t right)
 	sum = 1;
 	for (int i = 0; i < 32; i++)
 	{
-		power[i] = sum;
+		power[i] = sum; //2的1到31次幂数组，用于将位来拼凑成整数
 		sum *= 2;
 	}
 	return count;
@@ -197,7 +203,8 @@ void check(int r, int com_res[], int num,int left,int right) //检查数据是�
 		for (int j = 0; j < NB; j++)
 		{
 			__m128i tmp = _mm_and_si128(matrix[r][j], com_mask[com_res[i]]);   //如果matrix[r][j]中第com_res[i]位是1，tmp中对应位也是1
-			if (tmp.m128i_i64[0] != 0 || tmp.m128i_i64[1] != 0)  //判断tmp是否是全0
+            uint64_t *t = (uint64_t*)&tmp;
+			if (t[0] != 0 || t[1] != 0)  //判断tmp是否是全0
 			{
 				pri_value += power[31 - j]; 
 			}
@@ -210,15 +217,17 @@ void check(int r, int com_res[], int num,int left,int right) //检查数据是�
 		}
 	}
 }
-
+/**
+ * n is number of bit
+ */
 void find(__m128i my[NR][32], int n, int left,int right, int m)    //n在这里取32，value是要查找的值，m是NR
 {
 
 	__m128i tmp;									      //存放临时结果
 	__m128i t = _mm_set_epi32(MAX, MAX, MAX, MAX);        //辅助数组，初始化为全部都是1
 	__m128i zeros = _mm_setzero_si128();                  //0 vector
-	int count = find_init(left, right);
-	for (int j = 0; j < m; j++)
+	int count = find_init(left, right);  // count is the # of bits shared in common;
+	for (int j = 0; j < m; j++)  //m is the number of rows of data matrix
 	{
 		for (int i = 0; i < count; i++)
 		{
@@ -232,6 +241,9 @@ void find(__m128i my[NR][32], int n, int left,int right, int m)    //n在这里�
 			}
 		}
 	}
+    /**
+     * Check the com_mask. If com_mask[i] != 0, check this.
+     **/
 	int com_res[128];    //存放待进一步检查的位
 	int next = 0;
 	for (int i = 0; i < NR; i++)
@@ -239,12 +251,14 @@ void find(__m128i my[NR][32], int n, int left,int right, int m)    //n在这里�
 		for (int j = 0; j < NB*SLOT; j++)
 		{
 			__m128i tmp = _mm_and_si128(res[i],com_mask[j]);
-			if (tmp.m128i_i64[0] != 0 || tmp.m128i_i64[1] != 0)
+            uint64_t *t = (uint64_t*)&tmp;
+			if (t[0] != 0 || t[1] != 0)
 			{
 				com_res[next] = j;        //记录要进一步检查的位
 				next++;
 			}
 		}
+        //i 代表检查到第几个向量，next表示com_res的长度。com_res记录这个向量不为0的位
 		check(i, com_res, next,left,right);
 		/*printf("\n");
 		for (int k = 0; k < next; k++)
