@@ -1,27 +1,18 @@
-#include <stdio.h>
-#include <inttypes.h>
-#include <memory.h>
-#include <xmmintrin.h>
-#include <time.h>
-#include <stdlib.h>
-#include <emmintrin.h>
 #include "bitcolumn.h"
 #include "print_helper.h"
 
-
-
-static uint32_t mask[NB] = {
-	0x80000000, 0x40000000, 0x20000000, 0x10000000,
-	0x08000000, 0x04000000, 0x02000000, 0x01000000,
-	0x00800000, 0x00400000, 0x00200000, 0x00100000,
-	0x00080000, 0x00040000, 0x00020000, 0x00010000,
-	0x00008000, 0x00004000, 0x00002000, 0x00001000,
-	0x00000800, 0x00000400, 0x00000200, 0x00000100,
-	0x00000080, 0x00000040, 0x00000020, 0x00000010,
-	0x00000008, 0x00000004, 0x00000002, 0x00000001,
+uint32_t mask_32[NB] = {
+    0x80000000, 0x40000000, 0x20000000, 0x10000000,
+    0x08000000, 0x04000000, 0x02000000, 0x01000000,
+    0x00800000, 0x00400000, 0x00200000, 0x00100000,
+    0x00080000, 0x00040000, 0x00020000, 0x00010000,
+    0x00008000, 0x00004000, 0x00002000, 0x00001000,
+    0x00000800, 0x00000400, 0x00000200, 0x00000100,
+    0x00000080, 0x00000040, 0x00000020, 0x00000010,
+    0x00000008, 0x00000004, 0x00000002, 0x00000001,
 };
 
-__m128i com_mask[128];
+__m128i mask_128[128];
 
 
 __m128i res[NR];								//保存运用SSE时，比较的结果
@@ -33,24 +24,76 @@ FILE *readdata;
 uint32_t power[32];
 uint32_t res_set[10000];
 
-/**
+/*
+ * Init the environment
+*/
+void init()
+{
+    uint32_t sum;
+    
+    for (int i = 0; i < 4; i++)  //初始化mask_128 生成128位的掩码向量
+    {
+        sum = 2147483648;
+        for (int j = 0; j < 32; j++)
+        {
+            switch (i)
+            {
+                case 0:
+                    mask_128[i * 32 + j] = _mm_set_epi32(sum, 0, 0, 0);
+                    break;
+                case 1:
+                    mask_128[i * 32 + j] = _mm_set_epi32(0, sum, 0, 0);
+                    break;
+                case 2:
+                    mask_128[i * 32 + j] = _mm_set_epi32(0, 0, sum, 0);
+                    break;
+                case 3:
+                    mask_128[i * 32 + j] = _mm_set_epi32(0, 0, 0, sum);
+                    break;
+                default:
+                    break;
+            }
+            sum /= 2;
+        }
+    }
+    sum = 1;
+    for (int i = 0; i < 32; i++)
+    {
+        power[i] = sum; //2的1到31次幂数组，用于将位来拼凑成整数
+        sum *= 2;
+    }
+}
+
+
+/*
+ * If is the v is zeros, return 1, otherwise 0;
+ */
+int is_zero(__m128i* v)
+{
+    static __m128i zeros = _mm_setzero_si128();
+    return _mm_movemask_epi8(_mm_cmpeq_epi32(*v, zeros)) == 0xffff;
+}
+
+
+/*
 *   bit列存储的变换必须是bit的方阵，数组的长度=每个数的bit数
-**/
+*/
 void invert(uint32_t *src, uint32_t *inverse)
 {
 	for (int i = 0; i < NB; i++)               //mask loop
 	{
 		for (int j = 0; j<NB; j++)         //src loop
 		{
-			inverse[i] += i - j>0 ? (src[j] & mask[i]) << (i - j) : (src[j] & mask[i]) >> (j - i);
+			inverse[i] += i - j>0 ? (src[j] & mask_32[i]) << (i - j) : (src[j] & mask_32[i]) >> (j - i);
 		}
 	}
 	//print(inverse, NB);
 }
 
+
 /*
 * Pack 4 inverse array to mach one row of simd matrix. The length of src must be 128
-**/
+*/
 void pack2simdrow(uint32_t *src, uint32_t inverse[SLOT][NB])
 {
 	uint32_t srclet[NB];
@@ -165,31 +208,7 @@ int find_init(uint32_t left, uint32_t right)
 			break;
 	}
 	//printf("\n %d \n",count);
-	uint32_t sum = 1;
-
-	for (int i = 0; i < 4; i++)  //初始化com_mask 生成128位的掩码向量
-	{
-		sum = 2147483648;
-		for (int j = 0; j < 32; j++)
-		{
-			switch (i)
-			{
-			case 0:com_mask[i * 32 + j] = _mm_set_epi32(sum, 0, 0, 0); break;
-			case 1:com_mask[i * 32 + j] = _mm_set_epi32(0, sum, 0, 0); break;
-			case 2:com_mask[i * 32 + j] = _mm_set_epi32(0, 0, sum, 0); break;
-			case 3:com_mask[i * 32 + j] = _mm_set_epi32(0, 0, 0, sum); break;
-			default:
-				break;
-			}
-			sum /= 2;
-		}
-	}
-	sum = 1;
-	for (int i = 0; i < 32; i++)
-	{
-		power[i] = sum; //2的1到31次幂数组，用于将位来拼凑成整数
-		sum *= 2;
-	}
+	
 	return count;
 }
 
@@ -202,7 +221,7 @@ void check(int r, int com_res[], int num,int left,int right) //检查数据是�
 		pri_value = 0;
 		for (int j = 0; j < NB; j++)
 		{
-			__m128i tmp = _mm_and_si128(matrix[r][j], com_mask[com_res[i]]);   //如果matrix[r][j]中第com_res[i]位是1，tmp中对应位也是1
+			__m128i tmp = _mm_and_si128(matrix[r][j], mask_128[com_res[i]]);   //如果matrix[r][j]中第com_res[i]位是1，tmp中对应位也是1
             uint64_t *t = (uint64_t*)&tmp;
 			if (t[0] != 0 || t[1] != 0)  //判断tmp是否是全0
 			{
@@ -242,7 +261,7 @@ void find(__m128i my[NR][32], int n, int left,int right, int m)    //n在这里�
 		}
 	}
     /**
-     * Check the com_mask. If com_mask[i] != 0, check this.
+     * Check the mask_128. If mask_128[i] != 0, check this.
      **/
 	int com_res[128];    //存放待进一步检查的位
 	int next = 0;
@@ -250,7 +269,7 @@ void find(__m128i my[NR][32], int n, int left,int right, int m)    //n在这里�
 	{
 		for (int j = 0; j < NB*SLOT; j++)
 		{
-			__m128i tmp = _mm_and_si128(res[i],com_mask[j]);
+			__m128i tmp = _mm_and_si128(res[i], mask_128[j]);
             uint64_t *t = (uint64_t*)&tmp;
 			if (t[0] != 0 || t[1] != 0)
 			{
@@ -357,6 +376,6 @@ int main()
 	find_without_sse(data, N, left,right);
 	end = clock();
 	printf("Without SSE：%lf \n", (double)(end - begin) / CLOCKS_PER_SEC);
-	//print1dmatrix(com_mask,128);
+	//print1dmatrix(mask_128, 128);
 	return 0;
 }
