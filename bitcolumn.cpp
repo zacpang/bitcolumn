@@ -10,7 +10,7 @@ __m128i res[N_ROWS];								//保存运用SSE时，比较的结果
 __m128i matrix[N_ROWS][N_BITS];
 __m128i com_value[N_BITS];                         //由将要比较的数得到，生成比较的数组
 uint32_t data[N];
-FILE *readdata;
+
 
 uint32_t res_set[10000];
 
@@ -81,41 +81,6 @@ void pack2simdrow(uint32_t *src, uint32_t inverse[][N_BITS])
 
 }
 
-/**
-* Generating the data subject to some kind of distribution
-*/
-void datagenerator(uint32_t *data, int count)
-{
-	for (int i = 0; i < count; i++)
-	{
-		data[i] = i;
-	}
-	/*srand((unsigned)time(NULL));
-	for (int i = 1; i < count; i++)
-	{
-	data[i - 1] = (int)(double)rand()*(double)(MAX/RAND_MAX);
-	//data[i - 1] = rand();
-	}*/
-	/*for (int i = 0; i < 128; i++)
-	{
-		fscanf(readdata, "%d", &data[i]);
-	}*/
-}
-
-/**
-*  Read data from file
-**/
-/**
-void datareader()
-{
-readdata = fopen("/Users/zhifei/Desktop/randomnumbers_0.1billion.txt", "r+");
-int buffer[128];
-}
-**/
-
-/**
-* Load inverted data to a row of simd matrix
-**/
 
 void loadrow(__m128i matrix[][N_BITS], int row, uint32_t rowdata[N_SLOTS][N_BITS])
 {
@@ -134,14 +99,20 @@ void load2simdmatrix(__m128i matrix[][N_BITS])
 {
 
 	uint32_t inverse[N_SLOTS][N_BITS];
-	readdata = fopen("/Users/zhifei/Desktop/uniform_0.1billion.txt", "r+");
-	for (int i = 0; i<N_ROWS; i++) //read 128 numbers for a time
-	{
-		datagenerator(data + i*N_SLOTS*N_BITS, 128);
-		pack2simdrow(data + i*N_SLOTS*N_BITS, inverse);
-		loadrow(matrix, i, inverse);
-	}
-	fclose(readdata);
+    uint32_t buffer[V_LEN];
+    int buffer_idx = 0;
+    uint32_t row_counter = 0;
+    FILE *datafile = fopen("/Users/zhifei/Desktop/uniform_0.1billion.txt", "r+");
+
+    for(int i=0; i<N; i++)
+    {
+        fscanf(datafile,"%u",buffer[buffer_idx++]);
+        if(buffer_idx == V_LEN)
+        {
+            pack2simdrow(buffer, inverse);
+            loadrow(matrix, row_counter, inverse);
+        }
+    }
 }
 
 /**

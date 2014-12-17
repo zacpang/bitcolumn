@@ -22,7 +22,7 @@
 
 #define N_BITS 32                                  //number of bits of uint32_t
 #define N_SLOTS (128/NB)
-#define UINT32_MAX 4294967295                         //the MAX value of uint32_t
+#define UINT32MAX 4294967295                         //the MAX value of uint32_t
 #define V_LEN 128
 #define N_ROWS ((N + 127) / 128)                   //the number of raws of simd matrix
 #define N 128                                      //the # of numbers
