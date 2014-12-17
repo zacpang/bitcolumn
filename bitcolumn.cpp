@@ -1,72 +1,42 @@
 #include "bitcolumn.h"
 #include "print_helper.h"
 
-uint32_t mask_32[NB] = {
-    0x80000000, 0x40000000, 0x20000000, 0x10000000,
-    0x08000000, 0x04000000, 0x02000000, 0x01000000,
-    0x00800000, 0x00400000, 0x00200000, 0x00100000,
-    0x00080000, 0x00040000, 0x00020000, 0x00010000,
-    0x00008000, 0x00004000, 0x00002000, 0x00001000,
-    0x00000800, 0x00000400, 0x00000200, 0x00000100,
-    0x00000080, 0x00000040, 0x00000020, 0x00000010,
-    0x00000008, 0x00000004, 0x00000002, 0x00000001,
-};
+// Mask of 32b and 128b
+static uint32_t mask_32[32];
+static __m128i mask_128[128];
+static uint32_t power[32];  //The power of 2 from 1 to 32. The pow[32] is 2^32
 
-__m128i mask_128[128];
-
-
-__m128i res[NR];								//保存运用SSE时，比较的结果
-uint32_t res_without_sse[N];                    //保存顺序查询时，比较的结果
-__m128i matrix[NR][NB];
-__m128i com_value[NB];                         //由将要比较的数得到，生成比较的数组
+__m128i res[N_ROWS];								//保存运用SSE时，比较的结果
+__m128i matrix[N_ROWS][N_BITS];
+__m128i com_value[N_BITS];                         //由将要比较的数得到，生成比较的数组
 uint32_t data[N];
 FILE *readdata;
-uint32_t power[32];
+
 uint32_t res_set[10000];
 
 /*
- * Init the environment
+ * Init the environment. The 32b-mask, 128b-mask and the power array of 2
+ from 1 to 31.
 */
 void init()
 {
-    uint32_t sum;
-    
-    for (int i = 0; i < 4; i++)  //初始化mask_128 生成128位的掩码向量
+    uint32_t powof2 = _2POW31_;
+    for (int j = 0; j < 32; j++)
     {
-        sum = 2147483648;
-        for (int j = 0; j < 32; j++)
-        {
-            switch (i)
-            {
-                case 0:
-                    mask_128[i * 32 + j] = _mm_set_epi32(sum, 0, 0, 0);
-                    break;
-                case 1:
-                    mask_128[i * 32 + j] = _mm_set_epi32(0, sum, 0, 0);
-                    break;
-                case 2:
-                    mask_128[i * 32 + j] = _mm_set_epi32(0, 0, sum, 0);
-                    break;
-                case 3:
-                    mask_128[i * 32 + j] = _mm_set_epi32(0, 0, 0, sum);
-                    break;
-                default:
-                    break;
-            }
-            sum /= 2;
-        }
+        mask_128[j] = _mm_set_epi32(powof2, 0, 0, 0);
+        mask_128[32 + j] = _mm_set_epi32(0, powof2, 0, 0);
+        mask_128[64 + j] = _mm_set_epi32(0, 0, powof2, 0);
+        mask_128[96 + j] = _mm_set_epi32(0, 0, 0, powof2);
+
+        mask_32[j] = powof2;
+        power[31-j] = powof2;
+        powof2 = powof2>>1;
     }
-    sum = 1;
-    for (int i = 0; i < 32; i++)
-    {
-        power[i] = sum; //2的1到31次幂数组，用于将位来拼凑成整数
-        sum *= 2;
-    }
+
 }
 
-
 /*
- * If is the v is zeros, return 1, otherwise 0;
+ * If is the v is full of 0s, return 1; 0 otherwise
  */
 int is_zero(__m128i* v)
 {
@@ -74,39 +44,39 @@ int is_zero(__m128i* v)
     return _mm_movemask_epi8(_mm_cmpeq_epi32(*v, zeros)) == 0xffff;
 }
 
-
 /*
-*   bit列存储的变换必须是bit的方阵，数组的长度=每个数的bit数
+*    Invert the array to bit-column-way. The length of src and inverse must be 32!
+*
 */
-void invert(uint32_t *src, uint32_t *inverse)
+void uint32_invert(uint32_t *src, uint32_t *inverse)
 {
-	for (int i = 0; i < NB; i++)               //mask loop
+	for (int i = 0; i < N_BITS; i++)               //mask loop
 	{
-		for (int j = 0; j<NB; j++)         //src loop
+		for (int j = 0; j<N_BITS; j++)         //src loop
 		{
 			inverse[i] += i - j>0 ? (src[j] & mask_32[i]) << (i - j) : (src[j] & mask_32[i]) >> (j - i);
 		}
 	}
-	//print(inverse, NB);
+	//print(inverse, N_BITS);
 }
 
 
 /*
 * Pack 4 inverse array to mach one row of simd matrix. The length of src must be 128
 */
-void pack2simdrow(uint32_t *src, uint32_t inverse[SLOT][NB])
+void pack2simdrow(uint32_t *src, uint32_t inverse[][N_BITS])
 {
-	uint32_t srclet[NB];
-	uint32_t inverselet[NB];
+	uint32_t srclet[N_BITS];
+	uint32_t inverselet[N_BITS];
 
-	for (int i = 0; i<SLOT; i++)
+	for (int i = 0; i<N_SLOTS; i++) //For 32bit number, N_SLOTS would be 4;
 	{
-		memset(srclet, 0, sizeof(uint32_t)*NB); // init the srclet
-		memset(inverselet, 0, sizeof(uint32_t)*NB); // init the inverselet
-		memcpy(srclet, &src[i*NB], sizeof(uint32_t)*NB);
+		memset(srclet, 0, sizeof(uint32_t)*N_BITS); // init the srclet
+		memset(inverselet, 0, sizeof(uint32_t)*N_BITS); // init the inverselet
+		memcpy(srclet, &src[i*N_BITS], sizeof(uint32_t)*N_BITS);
 		invert(srclet, inverselet);
-		//print(inverselet, NB);
-		memcpy(inverse[i], inverselet, sizeof(uint32_t)*NB);
+		//print(inverselet, N_BITS);
+		memcpy(inverse[i], inverselet, sizeof(uint32_t)*N_BITS);
 	}
 
 }
@@ -147,10 +117,10 @@ int buffer[128];
 * Load inverted data to a row of simd matrix
 **/
 
-void loadrow(__m128i matrix[][NB], int row, uint32_t rowdata[SLOT][NB])
+void loadrow(__m128i matrix[][N_BITS], int row, uint32_t rowdata[N_SLOTS][N_BITS])
 {
 	//print2d(rowdata,4);
-	for (int i = 0; i<NB; i++)
+	for (int i = 0; i<N_BITS; i++)
 	{
 		matrix[row][i] = _mm_set_epi32(rowdata[0][i], rowdata[1][i], rowdata[2][i], rowdata[3][i]);
 	}
@@ -158,17 +128,17 @@ void loadrow(__m128i matrix[][NB], int row, uint32_t rowdata[SLOT][NB])
 
 
 /**
-* Load all data into simd matrix. For now, the total number MUST BE a multiple of 128.
+* Load all data into simd matrix. For now, the total number of data MUST BE a multiple of 128.
 */
-void load2simdmatrix(__m128i matrix[][NB])
+void load2simdmatrix(__m128i matrix[][N_BITS])
 {
 
-	uint32_t inverse[SLOT][NB];
+	uint32_t inverse[N_SLOTS][N_BITS];
 	readdata = fopen("/Users/zhifei/Desktop/uniform_0.1billion.txt", "r+");
-	for (int i = 0; i<NR; i++) //read 128 numbers for a time
+	for (int i = 0; i<N_ROWS; i++) //read 128 numbers for a time
 	{
-		datagenerator(data + i*SLOT*NB, 128);
-		pack2simdrow(data + i*SLOT*NB, inverse);
+		datagenerator(data + i*N_SLOTS*N_BITS, 128);
+		pack2simdrow(data + i*N_SLOTS*N_BITS, inverse);
 		loadrow(matrix, i, inverse);
 	}
 	fclose(readdata);
@@ -184,12 +154,12 @@ void load2simdmatrix(__m128i matrix[][NB])
 int find_init(uint32_t left, uint32_t right)
 {
 	int count = 0;
-	for (int i = 0; i < NR; i++)
+	for (int i = 0; i < N_ROWS; i++)
 	{
 		res[i] = _mm_set_epi32(MAX, MAX, MAX, MAX);	//初始化res,让他的每一位都是1
 	}
 
-	for (int i = 0; i < NB; i++)                  //形成比较向量
+	for (int i = 0; i < N_BITS; i++)                  //形成比较向量
 	{
 		int c = (left >> (31 - i)) % 2;      //获取当前比较位
 		int d = (right >> (31 - i)) % 2;
@@ -201,14 +171,14 @@ int find_init(uint32_t left, uint32_t right)
 				com_value[i] = _mm_set_epi32(0, 0, 0, 0);
 			else
 			{
-				com_value[i] = _mm_set_epi32(MAX, MAX, MAX, MAX);      //初始化比较数组   
+				com_value[i] = _mm_set_epi32(MAX, MAX, MAX, MAX);      //初始化比较数组
 			}
 		}
 		else
 			break;
 	}
 	//printf("\n %d \n",count);
-	
+
 	return count;
 }
 
@@ -219,19 +189,19 @@ void check(int r, int com_res[], int num,int left,int right) //检查数据是�
 	for (int i = 0; i < num; i++)
 	{
 		pri_value = 0;
-		for (int j = 0; j < NB; j++)
+		for (int j = 0; j < N_BITS; j++)
 		{
 			__m128i tmp = _mm_and_si128(matrix[r][j], mask_128[com_res[i]]);   //如果matrix[r][j]中第com_res[i]位是1，tmp中对应位也是1
             uint64_t *t = (uint64_t*)&tmp;
 			if (t[0] != 0 || t[1] != 0)  //判断tmp是否是全0
 			{
-				pri_value += power[31 - j]; 
+				pri_value += power[31 - j];
 			}
 		}
 		//printf("pri_value: %u \n", pri_value);
 		if (pri_value >= left && pri_value <= right)
 		{
-			res_set[res_index] = pri_value;  //res_set存放最终结果       
+			res_set[res_index] = pri_value;  //res_set存放最终结果
 			res_index++;
 		}
 	}
@@ -239,7 +209,7 @@ void check(int r, int com_res[], int num,int left,int right) //检查数据是�
 /**
  * n is number of bit
  */
-void find(__m128i my[NR][32], int n, int left,int right, int m)    //n在这里取32，value是要查找的值，m是NR
+void find(__m128i my[N_ROWS][32], int n, int left,int right, int m)    //n在这里取32，value是要查找的值，m是N_ROWS
 {
 
 	__m128i tmp;									      //存放临时结果
@@ -265,9 +235,9 @@ void find(__m128i my[NR][32], int n, int left,int right, int m)    //n在这里�
      **/
 	int com_res[128];    //存放待进一步检查的位
 	int next = 0;
-	for (int i = 0; i < NR; i++)
+	for (int i = 0; i < N_ROWS; i++)
 	{
-		for (int j = 0; j < NB*SLOT; j++)
+		for (int j = 0; j < N_BITS*N_SLOTS; j++)
 		{
 			__m128i tmp = _mm_and_si128(res[i], mask_128[j]);
             uint64_t *t = (uint64_t*)&tmp;
@@ -286,10 +256,10 @@ void find(__m128i my[NR][32], int n, int left,int right, int m)    //n在这里�
 		}
 		printf("\n");*/
 	}
-	//print1dmatrix(res,NR);
-	/*for (int i = 0; i < NR; i++)
+	//print1dmatrix(res,N_ROWS);
+	/*for (int i = 0; i < N_ROWS; i++)
 	{
-		for (int j = 0; j < SLOT; j++)
+		for (int j = 0; j < N_SLOTS; j++)
 		{
 			if (res[i].m128i_i32[j] == 0)
 			{
@@ -298,21 +268,21 @@ void find(__m128i my[NR][32], int n, int left,int right, int m)    //n在这里�
 			else
 			{
 				//printf("\n == %u ==\n", res[i].m128i_i32[j]);
-				for (int k = 0; k < NB; k++)
+				for (int k = 0; k < N_BITS; k++)
 				{
 					int c = (res[i].m128i_i32[j] >> k) % 2;
 					if (c == 0)
 						continue;
 					else
 					{
-						//printf("%d %d %d %d\n ", i, j, k, data[i * 128 + (SLOT - 1 - j)*NB + (NB - 1 - k)]);
-						//if (data[i * 128 + (SLOT - 1 - j)*NB + (NB - 1 - k)] < left || data[i * 128 + (SLOT - 1 - j)*NB + (NB - 1 - k)] > right)
+						//printf("%d %d %d %d\n ", i, j, k, data[i * 128 + (N_SLOTS - 1 - j)*N_BITS + (N_BITS - 1 - k)]);
+						//if (data[i * 128 + (N_SLOTS - 1 - j)*N_BITS + (N_BITS - 1 - k)] < left || data[i * 128 + (N_SLOTS - 1 - j)*N_BITS + (N_BITS - 1 - k)] > right)
 						int pri_value = 0;
-						for (int l = 0; l < NB; l++)
+						for (int l = 0; l < N_BITS; l++)
 						{
 							int flag= (uint32_t)(matrix[i][l].m128i_i32[j] >> k) % 2 ;
-							//printf("%d - %u %d %d %d \n", flag, matrix[i][l].m128i_i32[j],i,l,j);						
-							pri_value +=flag * power[31 - l];							
+							//printf("%d - %u %d %d %d \n", flag, matrix[i][l].m128i_i32[j],i,l,j);
+							pri_value +=flag * power[31 - l];
 						}
 						//printf("\npri_value : %d \n",pri_value);
 						if (pri_value < left || pri_value > right )
@@ -362,11 +332,11 @@ int main()
 	//print2dmatrix(matrix);
 
 	begin = clock();
-	
-	find(matrix, 32, left,right, NR);
+
+	find(matrix, 32, left,right, N_ROWS);
 	end = clock();
 	printf("Use SSE：%lf \n", (double)(end - begin) / CLOCKS_PER_SEC);
-	//print1dmatrix(res,NR);
+	//print1dmatrix(res,N_ROWS);
 	printf("final number: %d\n",res_index);
 	for (int j = 0; j < res_index; j++)
 	{
