@@ -1,23 +1,22 @@
 #include "bitcolumn.h"
 #include "print_helper.h"
 
-// Mask of 32b and 128b
 static uint32_t mask_32[32];
 static __m128i mask_128[128];
 static uint32_t power[32];  //The power of 2 from 1 to 32. The pow[32] is 2^32
+static __m128i res_mask[N_ROWS];	//保存运用SSE时，比较的结果
 
-__m128i res[N_ROWS];								//保存运用SSE时，比较的结果
+
 __m128i matrix[N_ROWS][N_BITS];
 __m128i com_value[N_BITS];                         //由将要比较的数得到，生成比较的数组
-uint32_t data[N];
-
-
-uint32_t res_set[10000];
+uint32_t res_set[10000]; //存放最终结果的10进制的数字，将来可以使用动态链表存放，为方便起见，开一个10^4数组
+int res_index = 0;
 
 /*
- * Init the environment. The 32b-mask, 128b-mask and the power array of 2
- from 1 to 31.
-*/
+ * Init the environment. 
+ 1) Generate a 32 bit mask, 128b mask and the power array of 2 from 1 to 31;
+ 2) Init the result mask;
+ */
 void init()
 {
     uint32_t powof2 = _2POW31_;
@@ -30,7 +29,13 @@ void init()
 
         mask_32[j] = powof2;
         power[31-j] = powof2;
+        
         powof2 = powof2>>1;
+    }
+    
+    for(int i=0; i<N_ROWS; i++)
+    {
+        res_mask[i] = _mm_set_epi32(UINT32MAX, UINT32MAX, UINT32MAX, UINT32MAX);
     }
 
 }
@@ -45,7 +50,7 @@ int is_zero(__m128i* v)
 }
 
 /*
-*    Invert the array to bit-column-way. The length of src and inverse must be 32!
+*  Invert the array to bit-column-way. The length of src and inverse MUST BE 32!
 *
 */
 void uint32_invert(uint32_t *src, uint32_t *inverse)
@@ -66,6 +71,7 @@ void uint32_invert(uint32_t *src, uint32_t *inverse)
 */
 void pack2simdrow(uint32_t *src, uint32_t inverse[][N_BITS])
 {
+    
 	uint32_t srclet[N_BITS];
 	uint32_t inverselet[N_BITS];
 
@@ -74,17 +80,16 @@ void pack2simdrow(uint32_t *src, uint32_t inverse[][N_BITS])
 		memset(srclet, 0, sizeof(uint32_t)*N_BITS); // init the srclet
 		memset(inverselet, 0, sizeof(uint32_t)*N_BITS); // init the inverselet
 		memcpy(srclet, &src[i*N_BITS], sizeof(uint32_t)*N_BITS);
-		invert(srclet, inverselet);
-		//print(inverselet, N_BITS);
+		uint32_invert(srclet, inverselet);
 		memcpy(inverse[i], inverselet, sizeof(uint32_t)*N_BITS);
 	}
-
 }
 
-
+/*
+ * Fill one row of simd matrix with inverse array.
+ */
 void loadrow(__m128i matrix[][N_BITS], int row, uint32_t rowdata[N_SLOTS][N_BITS])
 {
-	//print2d(rowdata,4);
 	for (int i = 0; i<N_BITS; i++)
 	{
 		matrix[row][i] = _mm_set_epi32(rowdata[0][i], rowdata[1][i], rowdata[2][i], rowdata[3][i]);
@@ -102,58 +107,75 @@ void load2simdmatrix(__m128i matrix[][N_BITS])
     uint32_t buffer[V_LEN];
     int buffer_idx = 0;
     uint32_t row_counter = 0;
-    FILE *datafile = fopen("/Users/zhifei/Desktop/uniform_0.1billion.txt", "r+");
+    FILE *datafile = fopen("/Users/zhifei/Desktop/test.txt", "r+");
 
     for(int i=0; i<N; i++)
     {
-        fscanf(datafile,"%u",buffer[buffer_idx++]);
+        fscanf(datafile,"%u",&buffer[buffer_idx++]);
         if(buffer_idx == V_LEN)
         {
             pack2simdrow(buffer, inverse);
-            loadrow(matrix, row_counter, inverse);
+            loadrow(matrix, row_counter++, inverse);
+            buffer_idx = 0;
+            
         }
     }
 }
 
 /**
- * 1. Convert the value to simd array. Range will be converted into a simd array whose length is # of bits
- * shared in common.
- * 2. A 128-bit mask will be crated.
- * 3. A power array which contains the power of 2 from 1 to 31 for the combination from bits to integer.
- *
- **/
-int find_init(uint32_t left, uint32_t right)
+ Convert a value into bit-column-store way.
+ */
+void convert_bitcolumn(uint32_t value, __m128i *v, int length)
 {
-	int count = 0;
-	for (int i = 0; i < N_ROWS; i++)
-	{
-		res[i] = _mm_set_epi32(MAX, MAX, MAX, MAX);	//初始化res,让他的每一位都是1
-	}
-
-	for (int i = 0; i < N_BITS; i++)                  //形成比较向量
-	{
-		int c = (left >> (31 - i)) % 2;      //获取当前比较位
-		int d = (right >> (31 - i)) % 2;
-		//printf("%u ", c);
-		if (c == d)
-		{
-			count++; //The # of bits shared in the common prefix of left and right
-			if (c == 0)
-				com_value[i] = _mm_set_epi32(0, 0, 0, 0);
-			else
-			{
-				com_value[i] = _mm_set_epi32(MAX, MAX, MAX, MAX);      //初始化比较数组
-			}
-		}
-		else
-			break;
-	}
-	//printf("\n %d \n",count);
-
-	return count;
+    uint32_t set_value;
+    
+    for(int i=0; i<length; i++)
+    {
+        set_value = ((value >> (31 - i)) % 2) * UINT32MAX;
+        v[i] = _mm_set_epi32(set_value, set_value, set_value, set_value);
+    }
 }
 
-int res_index = 0;
+/**
+ * 将两个数的共同高位bit串，转换成SIMD数组，返回真实的共同bit个数
+ */
+int convert_bitcolumn_prefix(uint32_t left, uint32_t right, __m128i *v, int length)
+{
+    int real_length = 0;
+    int flag1, flag2;
+    uint32_t set_value;
+    for(int i=0; i<length; i++)
+    {
+        flag1 = (left >> (31 - i)) % 2;
+        flag2 = (right >> (31 - i)) % 2;
+        if(flag1 != flag2)
+        {
+            break;
+        } else {
+            set_value = flag2 * UINT32MAX;
+            v[i] = _mm_set_epi32(set_value, set_value, set_value, set_value);
+            real_length++;
+        }
+        
+    }
+    
+    return real_length;
+}
+
+/*
+ tofind is the _m128i array which is converted by the value to find. The length
+ indicates the length of this value. 单点查询和范围查询均调用此函数
+ */
+void serach(__m128i data[N_ROWS][N_BITS], __m128i *tofind, int length)
+{
+    
+    
+}
+
+
+
+
+
 void check(int r, int com_res[], int num,int left,int right) //检查数据是否在left和right之间
 {
 	int pri_value = 0;   //记录要还原的数据
@@ -184,7 +206,7 @@ void find(__m128i my[N_ROWS][32], int n, int left,int right, int m)    //n在这
 {
 
 	__m128i tmp;									      //存放临时结果
-	__m128i t = _mm_set_epi32(MAX, MAX, MAX, MAX);        //辅助数组，初始化为全部都是1
+	__m128i t = _mm_set_epi32(UINT32MAX, UINT32MAX, UINT32MAX, UINT32MAX);        //辅助数组，初始化为全部都是1
 	__m128i zeros = _mm_setzero_si128();                  //0 vector
 	int count = find_init(left, right);  // count is the # of bits shared in common;
 	for (int j = 0; j < m; j++)  //m is the number of rows of data matrix
@@ -192,9 +214,9 @@ void find(__m128i my[N_ROWS][32], int n, int left,int right, int m)    //n在这
 		for (int i = 0; i < count; i++)
 		{
 			tmp = _mm_andnot_si128(_mm_xor_si128(my[j][i], com_value[i]), t);  //只有当my[j][i]和Value中对应的位相同时，tmp对应的位才是1. （没有非异或函数，所以先异或，再取反）
-			res[j] = _mm_and_si128(res[j], tmp); //与上一轮结果进行与操作，这样只有全部为1的最终结果才是1
+			res_mask[j] = _mm_and_si128(res_mask[j], tmp); //与上一轮结果进行与操作，这样只有全部为1的最终结果才是1
 
-			if (_mm_movemask_epi8(_mm_cmpeq_epi32(res[j], zeros)) == 0xffff)
+			if (_mm_movemask_epi8(_mm_cmpeq_epi32(res_mask[j], zeros)) == 0xffff)
 			{
 				//printf("BREAK\n");
 				break;
@@ -208,9 +230,9 @@ void find(__m128i my[N_ROWS][32], int n, int left,int right, int m)    //n在这
 	int next = 0;
 	for (int i = 0; i < N_ROWS; i++)
 	{
-		for (int j = 0; j < N_BITS*N_SLOTS; j++)
+		for (int j = 0; j <N_BITS*N_SLOTS; j++)
 		{
-			__m128i tmp = _mm_and_si128(res[i], mask_128[j]);
+			__m128i tmp = _mm_and_si128(res_mask[i], mask_128[j]);
             uint64_t *t = (uint64_t*)&tmp;
 			if (t[0] != 0 || t[1] != 0)
 			{
@@ -274,34 +296,21 @@ void find(__m128i my[N_ROWS][32], int n, int left,int right, int m)    //n在这
 }
 
 
-void find_without_sse(uint32_t* src, int n, int left,int right)  //顺序查找
-{
-
-	for (int i = 0; i < n; i++)
-	{
-		if (src[i] >= left && src[i] <= right)
-		{
-			res_without_sse[i] = 1;
-		}
-	}
-}
-
 int main()
 {
+    init(); //This cant be deleted
 
 	load2simdmatrix(matrix);
+    print2dmatrix(matrix);
 
 	//memset(res_without_sse, 0, sizeof(res_without_sse));      //初始化顺序查找结果数组
 	//print2dmatrix(matrix);
-
+/*
 	clock_t begin, end;
-	//4294967295
+	
 	uint32_t left = 47;
 	uint32_t right = 90;
-	//print(data,N);
-
-	//print2dmatrix(matrix);
-
+	
 	begin = clock();
 
 	find(matrix, 32, left,right, N_ROWS);
@@ -317,6 +326,6 @@ int main()
 	find_without_sse(data, N, left,right);
 	end = clock();
 	printf("Without SSE：%lf \n", (double)(end - begin) / CLOCKS_PER_SEC);
-	//print1dmatrix(mask_128, 128);
+	*/
 	return 0;
 }

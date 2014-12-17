@@ -25,11 +25,11 @@ void print(uint32_t *a, int count)
 /**
  *  Print 2-d array
  **/
-void print2d(uint32_t a[][NB], int row_count)
+void print2d(uint32_t a[][N_BITS], int row_count)
 {
     for (int i=0; i<row_count; i++)
     {
-        for (int j = 0; j<NB; j++)
+        for (int j = 0; j<N_BITS; j++)
         {
             printf("%u\t", a[i][j]);
         }
@@ -41,14 +41,14 @@ void print2d(uint32_t a[][NB], int row_count)
 /**
  * Print 2-d simd matrix
  **/
-void print2dmatrix(__m128i matrix[][NB])
+void print2dmatrix(__m128i matrix[][N_BITS])
 {
     
-    for (int k = 0; k < NR; k++)
+    for (int k = 0; k < N_ROWS; k++)
     {
-        for (int i = 0; i < SLOT; i++)
+        for (int i = 0; i < N_SLOTS; i++)
         {
-            for (int j = 0; j < NB; j++)
+            for (int j = 0; j < N_BITS; j++)
             {
                 uint32_t *t = (uint32_t*)&matrix[k][j];
                 printf("%u\t", t[i]);
@@ -67,7 +67,7 @@ void print1dmatrix(__m128i matrix[], int len)
 {
     for (int i=0; i<len; i++)
     {
-        for (int j=0; j<SLOT; j++)
+        for (int j=0; j<N_SLOTS; j++)
         {
             uint32_t *t = (uint32_t*)&matrix[i];
             printf("%u\t", t[j]);
