@@ -3,11 +3,16 @@
 
 static uint32_t mask_32[32];
 static __m128i mask_128[128];
+static uint32_t mask_groupby8[4]; //8位一组，分别为1，共4个数字
+static uint32_t mask_groupby16[2]; //16位一组，分别为1，共2个数字
 static uint32_t power[32];  //The power of 2 from 1 to 32. The pow[32] is 2^32
 static __m128i res_mask[N_ROWS];	//保存运用SSE时，比较的结果
 static __m128i ones, zeros;  //A simd vector with all 1s or 0s
 
 static __m128i matrix[N_ROWS][N_BITS];
+//static __m128i matrix[N_ATTR][N_ROWS][N_BITS];
+
+
 uint32_t res_set[10000]; //存放最终结果的10进制的数字，将来可以使用动态链表存放，为方便起见，开一个10^4数组
 int res_index = 0;
 
@@ -41,6 +46,15 @@ void init()
     {
         res_mask[i] = ones;
     }
+    
+    mask_groupby16[0] = 0xffff0000;
+    mask_groupby16[1] = 0x0000ffff;
+    
+    mask_groupby8[0] = 0xff000000;
+    mask_groupby8[1] = 0x00ff0000;
+    mask_groupby8[2] = 0x0000ff00;
+    mask_groupby8[3] = 0x000000ff;
+    
 }
 
 /*
