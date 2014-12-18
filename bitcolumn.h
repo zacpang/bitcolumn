@@ -22,7 +22,7 @@
 #define N 256                                      //the # of data
 
 #define _2POW31_ 2147483648
-
+#define DATATYPE_LEN 32 
 #define N_BITS 32                                  //含义已经变化。表示每一个ＳＩＭＤ矩阵的列数
 #define N_SLOTS 4                                  //N_SLOTS*N_BITS MUST BE 128
 #define UINT32MAX 4294967295                       //the MAX value of uint32_t

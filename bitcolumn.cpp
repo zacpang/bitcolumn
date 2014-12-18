@@ -44,7 +44,7 @@ void init()
 }
 
 /*
- * If is the v is full of 0s, return 1; 0 otherwise
+ * If is the v is full of 0s, return 1; 0 otherwise ?
  */
 int is_zero(__m128i* v)
 {
@@ -59,7 +59,7 @@ void uint32_invert(uint32_t *src, uint32_t *inverse)
 {
 	for (int i = 0; i < N_BITS; i++)               //mask loop
 	{
-		for (int j = 0; j<N_BITS; j++)         //src loop
+		for (int j = 0; j<DATATYPE_LEN; j++)         //src loop
 		{
 			inverse[i] += i - j>0 ? (src[j] & mask_32[i]) << (i - j) : (src[j] & mask_32[i]) >> (j - i);
 		}
@@ -74,14 +74,14 @@ void uint32_invert(uint32_t *src, uint32_t *inverse)
 void pack2simdrow(uint32_t *src, uint32_t inverse[][N_BITS])
 {
 
-	uint32_t srclet[N_BITS];
+	uint32_t srclet[DATATYPE_LEN];
 	uint32_t inverselet[N_BITS];
 
 	for (int i = 0; i<N_SLOTS; i++) //For 32bit number, N_SLOTS would be 4;
 	{
-		memset(srclet, 0, sizeof(uint32_t)*N_BITS); // init the srclet
+		memset(srclet, 0, sizeof(uint32_t)*DATATYPE_LEN); // init the srclet
 		memset(inverselet, 0, sizeof(uint32_t)*N_BITS); // init the inverselet
-		memcpy(srclet, &src[i*N_BITS], sizeof(uint32_t)*N_BITS);
+		memcpy(srclet, &src[i*DATATYPE_LEN], sizeof(uint32_t)*DATATYPE_LEN);
 		uint32_invert(srclet, inverselet);
 		memcpy(inverse[i], inverselet, sizeof(uint32_t)*N_BITS);
 	}
@@ -94,7 +94,7 @@ void loadrow(__m128i matrix[][N_BITS], int row, uint32_t rowdata[N_SLOTS][N_BITS
 {
 	for (int i = 0; i<N_BITS; i++)
 	{
-		matrix[row][i] = _mm_set_epi32(rowdata[0][i], rowdata[1][i], rowdata[2][i], rowdata[3][i]);
+		matrix[row][i] = _mm_set_epi32(rowdata[3][i], rowdata[2][i], rowdata[1][i], rowdata[0][i]);
 	}
 }
 
@@ -167,17 +167,17 @@ int convert_bitcolumn_double(uint32_t left, uint32_t right, __m128i *v)
  tofind is the _m128i array which is converted by the value to find. The length
  indicates the actual length of SIMD array. 单点查询和范围查询均调用此函数
  */
-void do_search(__m128i simd_mtx[N_ROWS][N_BITS], __m128i *to_find, int common_prefix_length)
+void do_search(__m128i simd_mtx[N_ROWS][N_BITS], __m128i *to_find, int prefix_length)
 {
     __m128i tmp;
     for(int row=0; row<N_ROWS; row++)
     {
-        for(int i=0; i<common_prefix_length; i++)
+        for(int i=0; i<prefix_length; i++)
         {
             tmp = _mm_andnot_si128(_mm_xor_si128(simd_mtx[row][i], to_find[i]), ones); //只有当simd_mtx[row][i]和tofind[i]中对应的位相同时，tmp对应的位才是1.
             res_mask[row] = _mm_and_si128(res_mask[row], tmp);
 
-            if (is_zero(res_mask[row]))
+            if (is_zero(&res_mask[row]))
 			{
 				break;
 			}
@@ -191,7 +191,7 @@ void do_search(__m128i simd_mtx[N_ROWS][N_BITS], __m128i *to_find, int common_pr
 void single_search(uint32_t value)
 {
     __m128i *to_find = (__m128i *)malloc(sizeof(__m128i)*N_BITS);
-    convert_bitcolumn_single(value, *to_find);
+    convert_bitcolumn_single(value, to_find);
     do_search(matrix, to_find, N_BITS); //执行完,res_mask中即得到对应元素的掩码。
 }
 
@@ -202,9 +202,15 @@ void range_search(uint32_t left, uint32_t right)
 {
     __m128i *to_find = (__m128i *)malloc(sizeof(__m128i)*N_BITS);
 
-    convert_bitcolumn_double(left, right, *to_find);
+    int real_length = convert_bitcolumn_double(left, right, to_find);
 
-    do_search(matrix, to_find, N_BITS); //执行完,res_mask中即得到对应元素的掩码。
+    do_search(matrix, to_find, real_length); //执行完,res_mask中即得到对应元素的掩码。
+    
+    
+    /**
+     * 如果共同前缀长度小于8，拼接
+     */
+    
 }
 
 /**
@@ -243,12 +249,13 @@ void range_validate_v1(uint32_t left, uint32_t right)
     int res_validate_bit_loc[V_LEN];    //存放待进一步检查的位
 	int rvbl_idx = 0;
     int flag;
-	for (int row = 0; row < N_ROWS; i++)
+    __m128i tmp;
+	for (int row = 0; row < N_ROWS; row++)
 	{
 		for (int j = 0; j <V_LEN; j++)
 		{
-            //tmp = _mm_and_si128(res_mask[i], mask_128[j]);
-            flag = is_zero(_mm_and_si128(res_mask[i], mask_128[j]));
+            tmp = _mm_and_si128(res_mask[row], mask_128[j]);
+            flag = is_zero(&tmp);
             res_validate_bit_loc[rvbl_idx] += j*flag;
             rvbl_idx += flag;
 		}
@@ -256,12 +263,26 @@ void range_validate_v1(uint32_t left, uint32_t right)
 	}
 }
 
+void clear_res_set()
+{
+    memset(res_set, 0, sizeof(uint32_t)*10000);
+    res_index = 0;
+}
+
+
+
+
 int main()
 {
     init(); //This cant be deleted
-    memset(res_set, 0, sizeof(uint32_t)*10000;
-    res_index = 0;
+    
 	load2simdmatrix(matrix);
+    
+    clear_res_set();
+    
+    range_search(3, 5);
+    
+    
     //print2dmatrix(matrix);
 
 	//memset(res_without_sse, 0, sizeof(res_without_sse));      //初始化顺序查找结果数组
