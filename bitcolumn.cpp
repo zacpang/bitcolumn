@@ -7,8 +7,7 @@ static uint32_t power[32];  //The power of 2 from 1 to 32. The pow[32] is 2^32
 static __m128i res_mask[N_ROWS];	//保存运用SSE时，比较的结果
 static __m128i ones, zeros;  //A simd vector with all 1s or 0s
 
-__m128i matrix[N_ROWS][N_BITS];
-__m128i com_value[N_BITS];                         //由将要比较的数得到，生成比较的数组
+static __m128i matrix[N_ROWS][N_BITS];
 uint32_t res_set[10000]; //存放最终结果的10进制的数字，将来可以使用动态链表存放，为方便起见，开一个10^4数组
 int res_index = 0;
 
@@ -257,15 +256,13 @@ void range_validate_v1(uint32_t left, uint32_t right)
 	}
 }
 
-
-
-
 int main()
 {
     init(); //This cant be deleted
-
+    memset(res_set, 0, sizeof(uint32_t)*10000;
+    res_index = 0;
 	load2simdmatrix(matrix);
-    print2dmatrix(matrix);
+    //print2dmatrix(matrix);
 
 	//memset(res_without_sse, 0, sizeof(res_without_sse));      //初始化顺序查找结果数组
 	//print2dmatrix(matrix);
