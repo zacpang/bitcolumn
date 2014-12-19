@@ -19,15 +19,15 @@
 
 
 
-#define N 256                                      //the # of data
+#define N 128                                    //the # of data
 
 #define _2POW31_ 2147483648
 #define UINT32MAX 4294967295                       //the MAX value of uint32_t
-
+#define R_NUM 3
 #define DATATYPE_LEN 32 
-#define N_BITS 32                                  //å«ä¹‰å·²ç»å˜åŒ–ã€‚è¡¨ç¤ºæ¯ä¸€ä¸ªSIMDçŸ©é˜µçš„åˆ—æ•°
-#define BITS_IN_ARY 24                             //æ•°æ®åœ¨æ•°ç»„ä¸­å­˜å‚¨çš„ä½æ•°ï¼ŒN_BITS+BITS_IN_ARY=æ•°æ®æ€»ä½æ•°
-#define N_SLOTS 4                                  //æ•°æ®ç±»å‹ç›®å‰æ˜¯uint32_t,æ‰€ä»¥slotæ˜¯4
+#define N_BITS 16                                  //º¬ÒåÒÑ¾­±ä»¯¡£±íÊ¾Ã¿Ò»¸öSIMD¾ØÕóµÄÁĞÊı
+#define BITS_IN_ARY 24                             //Êı¾İÔÚÊı×éÖĞ´æ´¢µÄÎ»Êı£¬N_BITS+BITS_IN_ARY=Êı¾İ×ÜÎ»Êı
+#define N_SLOTS 4                                  //Êı¾İÀàĞÍÄ¿Ç°ÊÇuint32_t,ËùÒÔslotÊÇ4
 #define V_LEN 128
 
 #define N_ROWS ((N + 127) / 128)                   //the number of raws of simd matrix
