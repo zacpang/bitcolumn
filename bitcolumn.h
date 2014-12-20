@@ -19,11 +19,11 @@
 
 
 
-#define N 128                                    //the # of data
+#define N 12800000                                 //the # of data
 
 #define _2POW31_ 2147483648
 #define UINT32MAX 4294967295                       //the MAX value of uint32_t
-#define R_NUM 3
+#define N_BYTE_INARRAY 3
 #define DATATYPE_LEN 32 
 #define N_BITS 16                                  //含义已经变化。表示每一个SIMD矩阵的列数
 #define BITS_IN_ARY 24                             //数据在数组中存储的位数，N_BITS+BITS_IN_ARY=数据总位数
