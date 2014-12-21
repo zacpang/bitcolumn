@@ -23,7 +23,6 @@ int res_index = 0;
  1) Generate a 32 bit mask, 128b mask and the power array of 2 from 1 to 31;
  2) Init the result mask;
  */
-void check(int real_length, int left, int right);
 void init()
 {
     ones = _mm_set_epi32(UINT32MAX, UINT32MAX, UINT32MAX, UINT32MAX);
@@ -76,7 +75,7 @@ int is_zero(__m128i* v)
 *  Invert the array to bit-column-way. The length of src and inverse MUST BE 32!
 *
 */
-void uint32_invert(uint32_t *src, uint32_t *inverse,int begin_index)
+void uint32_invert(uint32_t *src, uint32_t *inverse, int begin_index)
 {
 	for (int i = 0; i < N_BITS; i++)               //mask loop
 	{
@@ -86,91 +85,68 @@ void uint32_invert(uint32_t *src, uint32_t *inverse,int begin_index)
 		}
 	}
 	
-	for (int i = 0; i < DATATYPE_LEN; i++)
-	{
-		for (int j = 0; j < N_BYTE_INARRAY; j++)
-		{
-			array_data[begin_index + i][j] = (src[i] & mask_groupby8[N_SLOTS - N_BYTE_INARRAY + j]) >> ((N_BYTE_INARRAY - 1 - j) * 8);
-		}
-	}
+	
 	//print(inverse, N_BITS);
 }
 
 
 /*
-* Pack 4 inverse array to mach one row of simd matrix. The length of src must be 128
+* Pack 4 inverse array to mach one row of simd matrix. The length of src must be V_LEN 128
 */
-void pack2simdrow(uint32_t *src, uint32_t inverse[][N_BITS])
+void pack2simdrow(__m128i matrix[][N_BITS], int row, uint32_t *src, uint32_t inverse[][N_BITS])
 {
 
 	uint32_t srclet[DATATYPE_LEN];
 	uint32_t inverselet[N_BITS];
-	int index = 0;
-	for (int i = 0; i<N_SLOTS; i++) //For 32bit number, N_SLOTS would be 4;
+    for (int i = 0; i<N_SLOTS; i++) //For 32bit number, N_SLOTS would be 4;
 	{
 		memset(srclet, 0, sizeof(uint32_t)*DATATYPE_LEN); // init the srclet
 		memset(inverselet, 0, sizeof(uint32_t)*N_BITS); // init the inverselet
 		memcpy(srclet, &src[i*DATATYPE_LEN], sizeof(uint32_t)*DATATYPE_LEN);
-		uint32_invert(srclet, inverselet,index);
+		uint32_invert(srclet, inverselet, row*V_LEN+i*DATATYPE_LEN);
 		memcpy(inverse[i], inverselet, sizeof(uint32_t)*N_BITS);
-		index += DATATYPE_LEN;
-	}
+    }
+    
+    for (int i = 0; i<N_BITS; i++)
+    {
+        matrix[row][i] = _mm_set_epi32(inverse[3][i], inverse[2][i], inverse[1][i], inverse[0][i]);
+    }
+    
 }
-
-/*
- * Fill one row of simd matrix with inverse array.
- */
-void loadrow(__m128i matrix[][N_BITS], int row, uint32_t rowdata[N_SLOTS][N_BITS])
-{
-	for (int i = 0; i<N_BITS; i++)
-	{
-		matrix[row][i] = _mm_set_epi32(rowdata[3][i], rowdata[2][i], rowdata[1][i], rowdata[0][i]);
-	}
-}
-
 
 /**
 * Load all data into simd matrix. For now, the total number of data MUST BE a multiple of 128.
 */
-void load2simdmatrix(__m128i matrix[][N_BITS])
+void laod_all_data(__m128i matrix[][N_BITS])
 {
 	uint32_t inverse[N_SLOTS][N_BITS];
     uint32_t buffer[V_LEN];
-	int buffer_idx = 0;
+	uint32_t buffer_idx = 0;
     uint32_t row_counter = 0;
-	int count = 0;
-    FILE *datafile = fopen("randomnumbers_0.1billion.txt", "r+");
-    for(int i = 0; i < N; i++)
+    uint32_t data = 0;
+    
+    FILE *datafile = fopen("/Users/zhifei/Desktop/test.txt", "r+");
+    
+    for(int i = 0; i < N; i++) //process 128 data once a time
     {
-        fscanf(datafile,"%u",&buffer[buffer_idx]);
-		//buffer[buffer_idx] = _2POW31_ + i;
-		if (buffer[buffer_idx] >= 0 && buffer[buffer_idx] <= 65536)
-			count++;
-		buffer_idx++;
+        fscanf(datafile,"%u",&data);
+        buffer[buffer_idx++] = data;
+        
         if(buffer_idx == V_LEN)
         {
-            pack2simdrow(buffer, inverse);
-            loadrow(matrix, row_counter++, inverse);
+            pack2simdrow(matrix, row_counter++, buffer, inverse);
             buffer_idx = 0;
         }
+        
+        for (int j = 0; j < N_BYTE_INARRAY; j++) //将所有数据处理存储到array_data中。
+        {
+            array_data[i][j] = (data & mask_groupby8[N_SLOTS - N_BYTE_INARRAY + j]) >> ((N_BYTE_INARRAY - 1 - j) * 8);
+        }
+        
     }
 	fclose(datafile);
-	printf("real count:%d\n",count);
 }
 
-/**
- Convert single value into bit-column-store way. The length of v should be the # of bits of value
- */
-void convert_bitcolumn_single(uint32_t value, __m128i *v)
-{
-    uint32_t set_value;
-
-    for(int i=0; i<N_BITS; i++)
-    {
-        set_value = ((value >> (31 - i)) % 2) * UINT32MAX;
-        v[i] = _mm_set_epi32(set_value, set_value, set_value, set_value);
-    }
-}
 
 /**
  * 将两个数的共同高位bit串，转换成SIMD数组，返回真实的共同bit个数.如果共同bit数大于length,返回length。
@@ -221,16 +197,76 @@ void do_search(__m128i simd_mtx[N_ROWS][N_BITS], __m128i to_find[], int prefix_l
     }
 }
 
+
 /**
-* 单点查询
-*/
-void single_search(uint32_t value)
+ *检查数据是否在left和right之间，将位存储的数字组装成十进制的数字，然后和范围端点比较。
+ real_length，将来用于，如果范围端点共同位少于DATATYPE_LEN-BITS_INARRAY时候的验证，暂未考虑这种情况
+ */
+void check(int real_length, uint32_t left, uint32_t right)
 {
-    //__m128i *to_find = (__m128i *)malloc(sizeof(__m128i)*N_BITS);
-	__m128i to_find[N_BITS];
-    convert_bitcolumn_single(value, to_find);
-    do_search(matrix, to_find, N_BITS); //执行完,res_mask中即得到对应元素的掩码。
+    uint32_t pri_value = 0;   //记录要还原的数据
+    uint32_t* res_mask_chunk;
+    int is_one;
+    uint32_t res_remain;
+    int index = 0;
+    int array_data_anchor_idx = 0;
+    uint32_t newleft = left & row_mask[N_BYTE_INARRAY];
+    uint32_t newright = right & row_mask[N_BYTE_INARRAY];
+    
+    for (int i = 0; i < N_ROWS; i++)         //检查数组中的每个向量
+    {
+        if(_mm_movemask_epi8(_mm_cmpeq_epi32(res_mask[i], zeros)) == 0xffff)
+        {
+            continue;
+        }
+        
+        res_mask_chunk = (uint32_t*)&res_mask[i];
+        
+        for (int j = 0; j < N_SLOTS; j++)    //检查向量中的每个槽
+        {
+            if (res_mask_chunk[j] == 0)
+            {
+                continue;
+            }
+            else
+            {
+                res_remain = res_mask_chunk[j];
+                array_data_anchor_idx = (i << 7) + (j << 5) + 31;
+                
+                for (int k = 0; k < DATATYPE_LEN; k++)   //检查槽中的每个位
+                {
+                    is_one = res_remain  & 0x00000001;  //从低位向高位check，得到数据的最低位
+                    res_remain = res_remain >> 1;
+                    if (is_one == 0)
+                    {
+                        continue;
+                    }
+                    else
+                    {
+                        index = array_data_anchor_idx - k; //通过i,j,k变量，定位出res_mask向量中为1位在array_data中的位置
+                        pri_value = (array_data[index][0] << 16) + (array_data[index][1] << 8) + array_data[index][2];
+                        //printf("pri_value:%d\t index=%d\n",pri_value,index);
+                        if (pri_value >= newleft && pri_value <= newright)
+                        {
+                            res_index++;
+                        }
+                        /**
+                        else
+                        {
+                            res_mask_chunk[j] = res_mask_chunk[j] - power[k]; //将res_mask被验证无效的位置为0
+                        }**/
+                    }
+                    if (res_remain == 0) //如果当前槽位剩下的数字都是0的话，停止移位，直接退出该槽位
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+    }
 }
+
+
 
 /**
 * 范围查询
@@ -240,100 +276,19 @@ void range_search(uint32_t left, uint32_t right)
 	__m128i to_find[N_BITS];
     int real_length = convert_bitcolumn_double(left, right, to_find);
     do_search(matrix, to_find, real_length); //执行完,res_mask中即得到对应元素的掩码。
-	//range_validate_v1(left,right);
 	check(real_length,left,right);
-    /**
-     * 如果共同前缀长度小于8，拼接
-     */
     
 }
 
-/**
-*将位存储的数字组装成十进制的数字，然后和范围短点比较。
-*/
-void check(int real_length, int left, int right) //检查数据是否在left和right之间
-{
-	int pri_value = 0;   //记录要还原的数据
-	uint32_t* tmp_value;
-	int is_one;
-	uint32_t res_remain;
-	int index;
-	int big_index = 0;
-	int newleft = left && row_mask[N_BYTE_INARRAY];
-	int newright = right && row_mask[N_BYTE_INARRAY];
-	for (int i = 0; i < N_ROWS; i++)         //检查数组中的每个向量
-	{
-		tmp_value = (uint32_t*)&res_mask[i];
-		for (int j = 0; j < N_SLOTS; j++)    //检查向量中的每个槽
-		{
-			if (tmp_value[j] == 0)
-			{
-				continue;
-			}
-			else
-			{
-				res_remain = tmp_value[j];
-				
-				big_index = (i << 7) + (j << 5) + 31;
-				pri_value = 0;
-				for (int k = 0; k < DATATYPE_LEN; k++)   //检查槽中的每个位
-				{
-					is_one = res_remain  & 0x00000001;  //从低位向高位check，得到数据的最低位，如果想
-					res_remain = res_remain >> 1;
-					if (is_one == 0)
-					{
-						continue;
-					}
-					else
-					{
-						index = big_index - k;
-						for (int l = N_BYTE_INARRAY - 1; l >= 0; l--)
-						{
-							pri_value += array_data[index][N_BYTE_INARRAY - 1 - l] << (8 * l);
-						}
-						//pri_value = (array_data[index][0] << 16) + (array_data[index][1] << 8) + array_data[index][2];
-						//printf("pri_value:%d %d\n",pri_value,index);
-						if (pri_value >= newleft && pri_value <= right)
-						{
-							res_index++;
-						}
-						else
-						{
-							//res_mask[i].m128i_i32[j] = res_mask[i].m128i_i32[j] - power[k];
-							tmp_value[j] = tmp_value[j] - power[k];
-						}
-					}
-					if (res_remain == 0)
-					{
-						break;
-					}
-				}
-			}
-		}
-	}
-}
 
 /**
-*　此函数用于数据全部存储于simd_matrix的情况
-*/
-void range_validate_v1(uint32_t left, uint32_t right)
+ * 单点查询
+ */
+void single_search(uint32_t value)
 {
-    int res_validate_bit_loc[V_LEN];    //存放待进一步检查的位
-	int rvbl_idx = 0;
-    int flag;
-    __m128i tmp;
-	for (int row = 0; row < N_ROWS; row++)
-	{
-		for (int j = 0; j <V_LEN; j++)
-		{
-            tmp = _mm_and_si128(res_mask[row], mask_128[j]);
-            flag = is_zero(&tmp);
-            res_validate_bit_loc[rvbl_idx] += j*flag;
-            rvbl_idx += flag;
-		}
-       // check(res, left, right);
-	}
+    range_search(value,value);
 }
+
 
 void clear_res_set()
 {
@@ -341,14 +296,11 @@ void clear_res_set()
     res_index = 0;
 }
 
-
-
-
 int main()
 {
     init(); //This cant be deleted
     
-	load2simdmatrix(matrix);
+	laod_all_data(matrix);
 	//print2dmatrix(matrix);
 	/*for (int i = 0; i < N; i++)
 	{
@@ -361,10 +313,18 @@ int main()
     clear_res_set();
 	clock_t begin, end;
 	begin = clock();
-	range_search(0, 65535);
-	end = clock();
-	printf("time with sse:%d\n",end - begin);
+	//single_search(1);
+    range_search(5, 8);
+    end = clock();
+	printf("time with sse:%ld\n",(end - begin));
 	printf("count:%d \n", res_index);
+    
+    /**
+    for(int i=0; i<N; i++)
+    {
+        printf("index=%d\t%u\n",i,array_data[i][2]);
+    }**/
+    
     
     //print2dmatrix(matrix);
 

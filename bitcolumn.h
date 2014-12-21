@@ -19,7 +19,7 @@
 
 
 
-#define N 12800000                                 //the # of data
+#define N 256                                 //the # of data
 
 #define _2POW31_ 2147483648
 #define UINT32MAX 4294967295                       //the MAX value of uint32_t
