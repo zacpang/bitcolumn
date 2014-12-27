@@ -11,6 +11,7 @@ static __m128i res_mask[N_ROWS];	//保存运用SSE时，比较的结果
 static __m128i ones, zeros;  //A simd vector with all 1s or 0s
 static uint8_t array_data[N][CACHE_LINE_SIZE];
 static __m128i matrix[N_ATTR][N_ROWS][N_BITS];
+static uint32_t prefix_data[N_ATTR];
 //static __m128i matrix[N_ATTR][N_ROWS][N_BITS];
 
 
@@ -84,9 +85,6 @@ void uint32_invert(uint32_t *src, uint32_t *inverse, int begin_index)
 			inverse[i] += i - j>0 ? (src[j] & mask_32[i]) << (i - j) : (src[j] & mask_32[i]) >> (j - i);
 		}
 	}
-	
-	
-	print(inverse, N_BITS);
 }
 
 
@@ -101,13 +99,21 @@ void pack2simdrow(__m128i matrix[N_ATTR][N_ROWS][N_BITS], int row, uint32_t src[
 	uint32_t srclet[DATATYPE_LEN];
 	uint32_t inverselet[N_BITS];
 	
+	/*for (int i = 0; i<V_LEN; i++)
+	{
+		for (int j = 0; j<N_ATTR; j++)
+		{
+			printf("buffer:%u\t", src[i][j]);
+		}
+		printf("\n");
+	}*/
+
 	for (int i = 0; i < N_ATTR; i++)
 	{
 		for (int j = 0; j < V_LEN; j++)
 		{
-			src_with_attr[j] = src[i][j];
+			src_with_attr[j] = src[j][i];
 		} //Get the src with specific attribute
-			
 		for (int m = 0; m<N_SLOTS; m++) //For 32bit number, N_SLOTS would be 4;
 		{
 			memset(srclet, 0, sizeof(uint32_t)*DATATYPE_LEN); // init the srclet
@@ -137,21 +143,19 @@ void laod_all_data(__m128i matrix[][N_ROWS][N_BITS])
     uint32_t row_counter = 0;
 	uint32_t record[N_ATTR];
 	memset(record, 0, sizeof(uint32_t)* N_ATTR);
-    FILE *datafile = fopen("mutiple_attributes.txt", "r+");
+    FILE *datafile = fopen("C:\\Users\\king\\Source\\Repos\\bitcolumn\\7_differ_attr.txt", "r+");
     
     for(int i = 0; i < N; i++) //process 128 data once a time
     {
+		
+		for (int j = 0; j < N_ATTR; j++)
+		{
+			fscanf(datafile,"%u,",&record[j]);
+			buffer[buffer_idx][j] = record[j];
+		}
 		buffer_idx++;
         if(buffer_idx == V_LEN)
         {
-			for (int i = 0; i<V_LEN; i++)
-			{
-				for (int j = 0; j<N_ATTR; j++)
-				{
-					printf("%u\t", buffer[i][j]);
-				}
-				printf("\n");
-			}
             pack2simdrow(matrix, row_counter++, buffer);
             buffer_idx = 0;
         }
@@ -179,6 +183,7 @@ void convert_bitcolumn_double(uint32_t left[N_ATTR], uint32_t right[N_ATTR], __m
     int real_length = 0;
     int flag1, flag2;
     uint32_t set_value;
+	memset(prefix_data,0,sizeof(uint32_t)*N_ATTR);
 	for (int k = 0; k < N_ATTR; k++)
 	{
 		real_length = 0;
@@ -189,9 +194,13 @@ void convert_bitcolumn_double(uint32_t left[N_ATTR], uint32_t right[N_ATTR], __m
 			if (flag1 != flag2)
 			{
 				break;
-
 			}
-			else {
+			else 
+			{
+				if (i < 8)
+				{
+					prefix_data[k] += flag2 <<(31-i);
+				}
 				set_value = flag2 * UINT32MAX;
 				v[k][i] = _mm_set_epi32(set_value, set_value, set_value, set_value);
 				real_length++;
@@ -214,20 +223,19 @@ void do_search(__m128i simd_mtx[N_ATTR][N_ROWS][N_BITS], __m128i to_find[N_ATTR]
 		tmp = _mm_setzero_si128();
 		for (int row = 0; row < N_ROWS; row++)
 		{
-			for (int i = 0; i < prefix_length[k]; i++)
+			for (int i = prefix_length[k] - 1; i >= 0; i--)
 			{
-				tmp = _mm_andnot_si128(_mm_xor_si128(simd_mtx[k][row][i], to_find[k][i]), ones); //只有当simd_mtx[row][i]和tofind[i]中对应的位相同时，tmp对应的位才是1.
-				res_mask[row] = _mm_and_si128(res_mask[row], tmp);
-
 				if (_mm_movemask_epi8(_mm_cmpeq_epi32(res_mask[row], zeros)) == 0xffff)
 				{
 					break;
 				}
+				tmp = _mm_andnot_si128(_mm_xor_si128(simd_mtx[k][row][i], to_find[k][i]), ones); //只有当simd_mtx[row][i]和tofind[i]中对应的位相同时，tmp对应的位才是1.
+				res_mask[row] = _mm_and_si128(res_mask[row], tmp);
 			}
 		}
 	}
-	printf("\n");
-	print1dmatrix(res_mask);
+	//printf("\n");
+	//print1dmatrix(res_mask);
 }
 
 
@@ -243,15 +251,9 @@ void check(int prefix_length[N_ATTR], uint32_t left[N_ATTR], uint32_t right[N_AT
     uint32_t res_remain;
     int index = 0;
     int array_data_anchor_idx = 0;
-	uint32_t newleft[N_ATTR];
-	uint32_t newright[N_ATTR];
-	for (int i = 0; i < N_ATTR; i++)
-	{
-		newleft[i] = left[i] & row_mask[N_BYTE_INARRAY];
-		newright[i] = right[i] & row_mask[N_BYTE_INARRAY];
-	}
+	
 
-   
+	int total = 0, skip = 0;
 	memset(pri_value, 0, sizeof(uint32_t)*N_ATTR);
     for (int i = 0; i < N_ROWS; i++)         //检查数组中的每个向量
     {
@@ -283,19 +285,34 @@ void check(int prefix_length[N_ATTR], uint32_t left[N_ATTR], uint32_t right[N_AT
                     }
                     else
                     {
+						total++;
                         index = array_data_anchor_idx - k; //通过i,j,k变量，定位出res_mask向量中为1位在array_data中的位置
+						memset(pri_value, 0, sizeof(uint32_t)*N_ATTR);
+						uint32_t big_data = 0;
 						for (int m = 0; m < N_ATTR; m++)
 						{
 							int offset = m * N_BYTE_INARRAY;
-							pri_value[m] = (array_data[index][0 + offset] << 16) + (array_data[index][1 + offset] << 8) + array_data[index][2 + offset];
-							//printf("pri_value %d:%u ", m, pri_value[m]);
-							if (pri_value[m] < newleft[m] || pri_value[m] > newright[m])
+							uint32_t part = 0;
+							big_data = 0;
+							for (int t = prefix_length[m]; t < 8; t++)
+							{
+								part = ((matrix[m][i][t].m128i_i32[j] >> k) & 0x00000001);
+								if (part == 0)
+									continue;
+								else
+								{
+									part = part << (31 - t);
+									big_data += part;
+								}
+							}
+							pri_value[m] = big_data + prefix_data[m] + (array_data[index][0 + offset] << 16) + (array_data[index][1 + offset] << 8) + array_data[index][2 + offset];
+							//printf(" pri_value %d:%u ", m, pri_value[m]);
+							if (pri_value[m] < left[m] || pri_value[m] > right[m])
 							{
 								flag = 0;
 								break;
 							}
 						}
-						//printf("\n");
 						if (flag == 1)
 						{
 							res_index++;
@@ -308,14 +325,15 @@ void check(int prefix_length[N_ATTR], uint32_t left[N_ATTR], uint32_t right[N_AT
                             res_mask_chunk[j] = res_mask_chunk[j] - power[k]; //将res_mask被验证无效的位置为0
                         }**/
                     }
-                    /*if (res_remain == 0) //如果当前槽位剩下的数字都是0的话，停止移位，直接退出该槽位
+                    if (res_remain == 0) //如果当前槽位剩下的数字都是0的话，停止移位，直接退出该槽位
                     {
                         break;
-                    }*/
+                    }
                 }
             }
         }
     }
+	printf("tatal:%d\n",total);
 }
 
 
@@ -352,24 +370,41 @@ void clear_res_set()
 int main()
 {
     init(); //This cant be deleted
-    
+	clock_t begin, end;
+	begin = clock();
 	laod_all_data(matrix);
-	print3dmatrix(matrix);
+	end = clock();
+	printf("time load:%ld\n", (end - begin));
+	//print3dmatrix(matrix);
 	//print_array_data(array_data);
 
-	//print2dmatrix(matrix);
-	/*for (int i = 0; i < N; i++)
+	uint32_t left[N_ATTR];
+	uint32_t right[N_ATTR];
+	memset(left, 0, sizeof(uint32_t)* N_ATTR);
+	memset(right, 0, sizeof(uint32_t)* N_ATTR);
+
+	left[0] =  100000000;
+	right[0] = 2147480000;
+	left[1] =  20000000;
+	right[1] = 408435456 + 220000000;
+	left[2] = 1098765 - 495917;
+	right[2] = 3195917;
+	left[3] = 8388608 - 6000000;
+	right[3] = 8388608 + 8000000;
+	left[4] = 10922784;
+	right[4] = 27700000;
+	left[5] = 67108864 - 20000000;
+	right[5] = 67108864 + 60000000;
+	left[6] = 262144 + 1 + 62144;
+	right[6] = 524288 - 1;
+	/*for (int i = 0; i < N_ATTR; i++)
 	{
-		for (int j = 0; j < 3; j++)
-		{
-			printf("%u ", array_data[i][j]);
-		}
-		printf("\n");
+		//left[i] = 8388608;
+		//right[i] = 16777215;
+		left[i] =  0;
+		right[i] = 1100000000;
 	}*/
-	uint32_t left[N_ATTR] = {4,4,4};
-	uint32_t right[N_ATTR] = {9,9,9};
     clear_res_set();
-	clock_t begin, end;
 	begin = clock();
 	//single_search(1);
     range_search(left, right);
@@ -389,8 +424,6 @@ int main()
 	//memset(res_without_sse, 0, sizeof(res_without_sse));      //初始化顺序查找结果数组
 	//print2dmatrix(matrix);
 /*
-	clock_t begin, end;
-
 	uint32_t left = 47;
 	uint32_t right = 90;
 

@@ -67,7 +67,7 @@ void print3dmatrix(__m128i matrix[N_ATTR][N_ROWS][N_BITS])
 			{
 				for (int j = 0; j < N_BITS; j++)
 				{
-					uint32_t *t = (uint32_t*)&matrix[k][j];
+					uint32_t *t = (uint32_t*)&matrix[m][k][j];
 					printf("%u,", t[i]);
 				}
 				printf("\n\n\n");

@@ -19,7 +19,10 @@
 
 
 
-#define N 128                                 //the # of data
+#define N 1280000                             //the # of data
+#define N_ATTR  7                                 // The number of the attributes
+
+
 
 #define _2POW31_ 2147483648
 #define UINT32MAX 4294967295                       //the MAX value of uint32_t
@@ -32,6 +35,5 @@
 #define CACHE_LINE_SIZE 64
 #define N_ROWS ((N + 127) / 128)                   //the number of raws of simd matrix
 
-#define N_ATTR  3                                  // The number of the attributes
 
 #endif
